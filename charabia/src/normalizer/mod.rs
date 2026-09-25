@@ -18,12 +18,12 @@ pub use self::persian::PersianNormalizer;
 use self::quote::QuoteNormalizer;
 #[cfg(feature = "swedish-recomposition")]
 use self::swedish_recomposition::SwedishRecompositionNormalizer;
+#[cfg(feature = "thai")]
+use self::thai::ThaiNormalizer;
 #[cfg(feature = "turkish")]
 pub use self::turkish::TurkishNormalizer;
 #[cfg(feature = "vietnamese")]
 pub use self::vietnamese::VietnameseNormalizer;
-#[cfg(feature = "thai")]
-use self::thai::ThaiNormalizer;
 use crate::segmenter::SegmentedTokenIter;
 use crate::Token;
 
@@ -58,6 +58,8 @@ pub static NORMALIZERS: LazyLock<Vec<Box<dyn Normalizer>>> = LazyLock::new(|| {
         Box::new(CompatibilityDecompositionNormalizer),
         #[cfg(feature = "swedish-recomposition")]
         Box::new(SwedishRecompositionNormalizer),
+        #[cfg(feature = "thai")]
+        Box::new(ThaiNormalizer),
         Box::new(ControlCharNormalizer),
         Box::new(Classifier),
         Box::new(PersianNormalizer),
@@ -78,8 +80,6 @@ pub static LOSSY_NORMALIZERS: LazyLock<Vec<Box<dyn Normalizer>>> = LazyLock::new
         Box::new(GreekNormalizer),
         Box::new(ArabicNormalizer),
         Box::new(NonspacingMarkNormalizer),
-        #[cfg(feature = "thai")]
-        Box::new(ThaiNormalizer),
         #[cfg(feature = "vietnamese")]
         Box::new(VietnameseNormalizer),
         #[cfg(feature = "turkish")]
