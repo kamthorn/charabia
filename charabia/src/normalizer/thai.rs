@@ -36,6 +36,12 @@ pub struct ThaiNormalizer;
 
 impl Normalizer for ThaiNormalizer {
     fn normalize<'o>(&self, mut token: Token<'o>, options: &NormalizerOption) -> Token<'o> {
+        // `Normalize for &str` calls every normalizer without checking `should_normalize`,
+        // so return early to avoid allocating for text without a decomposed Sara Am.
+        if !token.lemma().contains(DECOMPOSED_SARA_AM) {
+            return token;
+        }
+
         match token.char_map.take() {
             Some(mut char_map) => {
                 // a char_map already exists, keep it in sync with the recomposed lemma.
@@ -96,7 +102,7 @@ fn recompose_with_char_map(lemma: &str, char_map: &mut [(u8, u8)]) -> String {
 
 #[cfg(test)]
 mod test {
-    use std::borrow::Cow::Owned;
+    use std::borrow::Cow::{Borrowed, Owned};
 
     use crate::normalizer::{Normalizer, NormalizerOption};
     use crate::{Language, Script, Token};
@@ -129,6 +135,17 @@ mod test {
             };
         let result = normalize(token);
         assert_eq!(result.lemma(), "วิทยุ");
+    }
+
+    #[test]
+    fn normalize_without_decomposed_sara_am_does_not_allocate() {
+        // `normalize` can be called without `should_normalize`, e.g. when normalizing a `&str`.
+        for lemma in ["วิทยุ", "น้ำ", "hello"] {
+            let token = Token { lemma: Borrowed(lemma), ..Default::default() };
+            let result = ThaiNormalizer.normalize(token, &NORMALIZER_OPTIONS);
+            assert!(matches!(result.lemma, Borrowed(_)), "{lemma} must not be reallocated");
+            assert!(result.char_map.is_none());
+        }
     }
 
     #[test]
