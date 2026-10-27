@@ -17,6 +17,15 @@ pub(crate) fn is_zero_width(c: char) -> bool {
     matches!(c, '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{feff}')
 }
 
+/// Returns `true` if the character is a Thai combining mark:
+/// - Vowels: U+0E31 (ั), U+0E34–U+0E3A (ิ, ี, ึ, ื, ุ, ู, ฺ)
+/// - Tone marks: U+0E48–U+0E4B (่, ้, ๊, ๋)
+/// - Other marks: U+0E47 (็), U+0E4C–U+0E4E (์, ํ, ๎)
+#[inline]
+pub(crate) fn is_thai_combining_mark(c: char) -> bool {
+    matches!(c, '\u{e31}' | '\u{e34}'..='\u{e3a}' | '\u{e47}'..='\u{e4e}')
+}
+
 /// A [`Normalizer`] for the Thai script.
 ///
 /// Thai combining marks are semantically significant characters that must be
@@ -37,6 +46,9 @@ pub(crate) fn is_zero_width(c: char) -> bool {
 /// - **Filters Zero-Width Characters** (U+200B, U+200C, U+200D, U+FEFF): Removes
 ///   invisible zero-width space, non-joiner, joiner, and BOM characters from
 ///   tokens while keeping character offsets in sync.
+/// - **Deduplicates Combining Marks**: Removes consecutive duplicate Thai combining
+///   marks (e.g. repeated tone marks like ้้ or repeated vowels like ิิ) that often
+///   occur from typing errors or PDF copy-paste, while keeping character offsets in sync.
 /// - **Recomposes Sara Am** (ำ, U+0E33): Restores Sara Am which may have
 ///   been split into Nikhahit (U+0E4D) + Sara Aa (U+0E32) by the
 ///   [`CompatibilityDecompositionNormalizer`](super::CompatibilityDecompositionNormalizer).
@@ -83,9 +95,29 @@ impl Normalizer for ThaiNormalizer {
 }
 
 /// Returns `true` if the text contains characters that need normalization
-/// (decomposed Sara Am or Zero-Width characters inside a word).
+/// (decomposed Sara Am, Zero-Width characters, or duplicate combining marks inside a word).
 fn needs_normalization(text: &str) -> bool {
-    contains_decomposed_sara_am(text) || contains_zero_width_inside_word(text)
+    contains_decomposed_sara_am(text)
+        || contains_zero_width_inside_word(text)
+        || contains_duplicate_combining_marks(text)
+}
+
+fn contains_duplicate_combining_marks(text: &str) -> bool {
+    let mut prev = None;
+    for c in text.chars() {
+        if is_zero_width(c) {
+            continue;
+        }
+        if is_thai_combining_mark(c) && prev == Some(c) {
+            return true;
+        }
+        if is_thai_combining_mark(c) {
+            prev = Some(c);
+        } else {
+            prev = None;
+        }
+    }
+    false
 }
 
 fn contains_zero_width_inside_word(text: &str) -> bool {
@@ -109,17 +141,18 @@ fn completes_sara_am(rest: &str) -> bool {
     }
 }
 
-/// Recompose Nikhahit (U+0E4D) + Sara Aa (U+0E32) into Sara Am (U+0E33) and remove zero-width characters,
-/// yielding the length of each original char and the char it is replaced by:
-/// zero-width characters are dropped when part of a word, Nikhahit is dropped, a tone mark between them is kept as-is,
-/// and Sara Aa becomes Sara Am.
+/// Recompose Nikhahit (U+0E4D) + Sara Aa (U+0E32) into Sara Am (U+0E33), remove zero-width characters,
+/// and deduplicate consecutive combining marks, yielding the length of each original char and the char it is replaced by.
 fn recompose(lemma: &str) -> impl Iterator<Item = (usize, Option<char>)> + '_ {
     let drop_zero_width = lemma.chars().any(|c| !is_zero_width(c));
     let mut pending_sara_am = false;
+    let mut prev_combining = None;
     lemma.char_indices().map(move |(i, c)| {
         let recomposed = match c {
             // zero-width characters inside a word are dropped.
             c if is_zero_width(c) && drop_zero_width => None,
+            // duplicate combining mark is dropped.
+            c if is_thai_combining_mark(c) && prev_combining == Some(c) => None,
             // the following Sara Aa is replaced by Sara Am.
             NIKHAHIT if completes_sara_am(&lemma[i + c.len_utf8()..]) => {
                 pending_sara_am = true;
@@ -131,6 +164,9 @@ fn recompose(lemma: &str) -> impl Iterator<Item = (usize, Option<char>)> + '_ {
             }
             c => Some(c),
         };
+        if !is_zero_width(c) {
+            prev_combining = if is_thai_combining_mark(c) { Some(c) } else { None };
+        }
         (c.len_utf8(), recomposed)
     })
 }
@@ -571,6 +607,45 @@ mod test {
                 normalized.original_lengths(normalized.lemma().len()),
                 (word.chars().count(), word.len())
             );
+        }
+    }
+
+    #[test]
+    fn duplicate_combining_marks_are_deduplicated_during_normalization() {
+        use crate::normalizer::Normalize;
+
+        for (input, expected) in [
+            ("น้้้ำ", "น้ำ"),
+            ("วี้้", "วี้"),
+            ("วิิชา", "วิชา"),
+            ("ดุุ", "ดุ"),
+            ("สิทธิ์์", "สิทธิ์"),
+            ("วานััน", "วานัน"),
+            ("ง่่าย", "ง่าย"),
+            ("ข้้้อความ", "ข้อความ"),
+        ] {
+            let token = Token {
+                lemma: Owned(input.to_string()),
+                char_end: input.chars().count(),
+                byte_end: input.len(),
+                script: Script::Thai,
+                language: Some(Language::Tha),
+                ..Default::default()
+            };
+            let options =
+                NormalizerOption { create_char_map: true, lossy: false, ..Default::default() };
+            let normalized = token.normalize(&options);
+            assert_eq!(normalized.lemma(), expected, "failed for input {input:?}");
+            // char_map must account for all original input characters
+            if let Some(char_map) = normalized.char_map {
+                let total_orig_chars = char_map.len();
+                let total_orig_bytes: usize = char_map.iter().map(|(orig, _)| *orig as usize).sum();
+                assert_eq!(
+                    (total_orig_chars, total_orig_bytes),
+                    (input.chars().count(), input.len()),
+                    "char_map sum mismatch for input {input:?}"
+                );
+            }
         }
     }
 }

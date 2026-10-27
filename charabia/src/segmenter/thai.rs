@@ -2,7 +2,7 @@ use std::sync::LazyLock;
 
 use fst::raw::Fst;
 
-use crate::normalizer::thai::is_zero_width;
+use crate::normalizer::thai::{is_thai_combining_mark, is_zero_width};
 // Import `Segmenter` trait.
 use crate::segmenter::Segmenter;
 
@@ -123,6 +123,7 @@ fn for_each_dictionary_match(fst: &Fst<&[u8]>, chars: &[(usize, char)], mut f: i
     let mut node = fst.root();
     let mut buffer = [0; 4];
     let mut len = 0;
+    let mut prev_combining = None;
     while let Some(&(_, c)) = chars.get(len) {
         if is_zero_width(c) {
             len += 1;
@@ -130,6 +131,18 @@ fn for_each_dictionary_match(fst: &Fst<&[u8]>, chars: &[(usize, char)], mut f: i
                 f(len);
             }
             continue;
+        }
+        if is_thai_combining_mark(c) && prev_combining == Some(c) {
+            len += 1;
+            if node.is_final() {
+                f(len);
+            }
+            continue;
+        }
+        if is_thai_combining_mark(c) {
+            prev_combining = Some(c);
+        } else {
+            prev_combining = None;
         }
         let char_at = |i: usize| chars.get(i).map(|(_, c)| *c);
         let (matched, char_count) = match (c, char_at(len + 1), char_at(len + 2)) {
@@ -363,6 +376,19 @@ mod test {
             .map(|t| t.lemma().to_string())
             .collect();
         assert_eq!(tokens, ["ภาษาไทย", "ง่าย", "นิดเดียว"]);
+    }
+
+    #[test]
+    fn duplicate_combining_marks_do_not_break_segmentation() {
+        for (input, expected) in [
+            ("วิิชา", &["วิชา"][..]),
+            ("ข้้้อความ", &["ข้อความ"][..]),
+            ("สิทธิ์์การใช้งาน", &["สิทธิ์", "การใช้งาน"][..]),
+        ] {
+            let tokens: Vec<_> =
+                crate::Tokenize::tokenize(&input).map(|t| t.lemma().to_string()).collect();
+            assert_eq!(tokens, expected);
+        }
     }
 
     #[test]
