@@ -331,4 +331,29 @@ mod test {
             assert_eq!(segment_thai(text).concat(), text);
         }
     }
+
+    #[test]
+    fn zero_width_space_acts_as_separator() {
+        use crate::TokenKind;
+
+        let tokens: Vec<_> = crate::Tokenize::tokenize(&"ภาษาไทย\u{200b}ง่ายนิดเดียว").collect();
+        let lemmas: Vec<_> = tokens.iter().map(|t| t.lemma()).collect();
+        let kinds: Vec<_> = tokens.iter().map(|t| t.kind).collect();
+
+        assert_eq!(lemmas, ["ภาษาไทย", "\u{200b}", "ง่าย", "นิดเดียว"]);
+        assert!(matches!(kinds[0], TokenKind::Word));
+        assert!(matches!(kinds[1], TokenKind::Separator(_)));
+        assert!(matches!(kinds[2], TokenKind::Word));
+        assert!(matches!(kinds[3], TokenKind::Word));
+    }
+
+    #[test]
+    fn long_academic_compounds_are_segmented_into_constituent_words() {
+        assert_eq!(segment_thai("มหาวิทยาลัยเชียงใหม่"), ["มหาวิทยาลัย", "เชียงใหม่"]);
+        assert_eq!(segment_thai("มหาวิทยาลัยธรรมศาสตร์"), ["มหาวิทยาลัย", "ธรรมศาสตร์"]);
+        assert_eq!(segment_thai("คณะวิศวกรรมศาสตร์"), ["คณะ", "วิศวกรรมศาสตร์"]);
+        assert_eq!(segment_thai("กระทรวงการต่างประเทศ"), ["กระทรวง", "การต่างประเทศ"]);
+        assert_eq!(segment_thai("บริหารธุรกิจมหาบัณฑิต"), ["บริหารธุรกิจ", "มหาบัณฑิต"]);
+        assert_eq!(segment_thai("วิทยาศาสตร์การกีฬา"), ["วิทยาศาสตร์", "การกีฬา"]);
+    }
 }

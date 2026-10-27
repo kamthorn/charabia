@@ -12,11 +12,11 @@
 /// - Zl Line Separator
 /// - Zp Paragraph Separator
 /// - Zs Space Separator
-///   plus "\0", ". ", ", " and ។ល។" (៘ decomposition) to categorize them as hard separators
+///   plus "\0", ". ", ", ", "\u{200B}", "\u{200C}" and "ฯลฯ" (៘ decomposition) to categorize them as hard separators
 ///   and "`" to understand markdown formatted text
 #[rustfmt::skip]
 pub const DEFAULT_SEPARATORS: &[&str] = &[
-    "\0", ". ", ", ", "_", "‿", "\u{200C}", "⁀", "⁔", "︳", "︴", "﹍", "﹎", "﹏", "＿", "-", "֊", "־", "᐀", "᠆", "‐", "‒", "–",
+    "\0", ". ", ", ", "_", "‿", "\u{200B}", "\u{200C}", "⁀", "⁔", "︳", "︴", "﹍", "﹎", "﹏", "＿", "-", "֊", "־", "᐀", "᠆", "‐", "‒", "–",
     "—", "―", "⸗", "⸚", "⸺", "⸻", "⹀", "〜", "〰", "゠", "︱", "︲", "﹘", "﹣", "－", "𐺭", ")",
     "]", "}", "༻", "༽", "᚜", "⁆", "⁾", "₎", "⌉", "⌋", "〉", "❩", "❫", "❭", "❯", "❱", "❳", "❵", "⟆",
     "⟧", "⟩", "⟫", "⟭", "⟯", "⦄", "⦆", "⦈", "⦊", "⦌", "⦎", "⦐", "⦒", "⦔", "⦖", "⦘", "⧙", "⧛", "⧽",

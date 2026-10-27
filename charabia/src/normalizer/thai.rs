@@ -6,6 +6,7 @@ use crate::{Script, Token};
 const NIKHAHIT: char = '\u{e4d}';
 const SARA_AA: char = '\u{e32}';
 const SARA_AM: char = '\u{e33}';
+const ZWSP: char = '\u{200b}';
 
 /// A [`Normalizer`] for the Thai script.
 ///
@@ -23,22 +24,25 @@ const SARA_AM: char = '\u{e33}';
 /// Thai combining marks are integral to correct orthography and must be
 /// preserved to ensure accurate search results.
 ///
-/// Additionally, this normalizer **recomposes** Sara Am (ำ, U+0E33) which may have
-/// been split into Nikhahit (U+0E4D) + Sara Aa (U+0E32) by the
-/// [`CompatibilityDecompositionNormalizer`](super::CompatibilityDecompositionNormalizer).
-/// Sara Am is a single, meaningful vowel in Thai and should be treated as one unit
-/// for indexing purposes. Sara Am typed as Nikhahit + tone mark + Sara Aa (e.g. นํ้า)
-/// is also recomposed, into tone mark + Sara Am (น้ำ).
+/// Additionally, this normalizer:
+/// - **Filters Zero-Width Space** (U+200B): Removes zero-width space characters
+///   from tokens while keeping character offsets in sync.
+/// - **Recomposes Sara Am** (ำ, U+0E33): Restores Sara Am which may have
+///   been split into Nikhahit (U+0E4D) + Sara Aa (U+0E32) by the
+///   [`CompatibilityDecompositionNormalizer`](super::CompatibilityDecompositionNormalizer).
+///   Sara Am is a single, meaningful vowel in Thai and should be treated as one unit
+///   for indexing purposes. Sara Am typed as Nikhahit + tone mark + Sara Aa (e.g. นํ้า)
+///   is also recomposed, into tone mark + Sara Am (น้ำ).
 ///
-/// The recomposition is not lossy, so this normalizer is part of the default
+/// The normalization is not lossy, so this normalizer is part of the default
 /// normalizers and runs whether or not lossy normalization is enabled.
 pub struct ThaiNormalizer;
 
 impl Normalizer for ThaiNormalizer {
     fn normalize<'o>(&self, mut token: Token<'o>, options: &NormalizerOption) -> Token<'o> {
         // `Normalize for &str` calls every normalizer without checking `should_normalize`,
-        // so return early to avoid allocating for text without a decomposed Sara Am.
-        if !contains_decomposed_sara_am(token.lemma()) {
+        // so return early to avoid allocating for text that does not need normalization.
+        if !needs_normalization(token.lemma()) {
             return token;
         }
 
@@ -64,8 +68,14 @@ impl Normalizer for ThaiNormalizer {
     }
 
     fn should_normalize(&self, token: &Token) -> bool {
-        token.script == Script::Thai && contains_decomposed_sara_am(token.lemma())
+        token.script == Script::Thai && needs_normalization(token.lemma())
     }
+}
+
+/// Returns `true` if the text contains characters that need normalization
+/// (decomposed Sara Am or Zero-Width Space inside a word).
+fn needs_normalization(text: &str) -> bool {
+    contains_decomposed_sara_am(text) || (text.contains(ZWSP) && text.chars().any(|c| c != ZWSP))
 }
 
 /// Returns `true` if the text contains Sara Am typed as Nikhahit (U+0E4D) + Sara Aa (U+0E32),
@@ -85,14 +95,17 @@ fn completes_sara_am(rest: &str) -> bool {
     }
 }
 
-/// Recompose Nikhahit (U+0E4D) + Sara Aa (U+0E32) into Sara Am (U+0E33),
+/// Recompose Nikhahit (U+0E4D) + Sara Aa (U+0E32) into Sara Am (U+0E33) and remove ZWSP (U+200B),
 /// yielding the length of each original char and the char it is replaced by:
-/// Nikhahit is dropped, a tone mark between them is kept as-is,
+/// ZWSP is dropped when part of a word, Nikhahit is dropped, a tone mark between them is kept as-is,
 /// and Sara Aa becomes Sara Am.
 fn recompose(lemma: &str) -> impl Iterator<Item = (usize, Option<char>)> + '_ {
+    let drop_zwsp = lemma.chars().any(|c| c != ZWSP);
     let mut pending_sara_am = false;
     lemma.char_indices().map(move |(i, c)| {
         let recomposed = match c {
+            // zero-width space inside a word is dropped.
+            ZWSP if drop_zwsp => None,
             // the following Sara Aa is replaced by Sara Am.
             NIKHAHIT if completes_sara_am(&lemma[i + c.len_utf8()..]) => {
                 pending_sara_am = true;
@@ -514,5 +527,29 @@ mod test {
                 }
             }
         }
+    }
+
+    #[test]
+    fn zero_width_space_is_removed_during_normalization() {
+        use crate::normalizer::Normalize;
+
+        let word_with_zwsp = "ภาษา\u{200b}ไทย";
+        let token = Token {
+            lemma: Owned(word_with_zwsp.to_string()),
+            char_end: word_with_zwsp.chars().count(),
+            byte_end: word_with_zwsp.len(),
+            script: Script::Thai,
+            language: Some(Language::Tha),
+            ..Default::default()
+        };
+        let options =
+            NormalizerOption { create_char_map: true, lossy: false, ..Default::default() };
+        let normalized = token.normalize(&options);
+        assert_eq!(normalized.lemma(), "ภาษาไทย");
+        // char_map should map normalized length back to original length including the 3-byte ZWSP
+        assert_eq!(
+            normalized.original_lengths(normalized.lemma().len()),
+            (word_with_zwsp.chars().count(), word_with_zwsp.len())
+        );
     }
 }
