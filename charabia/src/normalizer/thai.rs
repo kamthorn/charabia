@@ -6,7 +6,16 @@ use crate::{Script, Token};
 const NIKHAHIT: char = '\u{e4d}';
 const SARA_AA: char = '\u{e32}';
 const SARA_AM: char = '\u{e33}';
-const ZWSP: char = '\u{200b}';
+
+/// Returns `true` if the character is an invisible zero-width character:
+/// - `\u{200B}` ZERO WIDTH SPACE (ZWSP)
+/// - `\u{200C}` ZERO WIDTH NON-JOINER (ZWNJ)
+/// - `\u{200D}` ZERO WIDTH JOINER (ZWJ)
+/// - `\u{FEFF}` ZERO WIDTH NO-BREAK SPACE / BYTE ORDER MARK (BOM)
+#[inline]
+pub(crate) fn is_zero_width(c: char) -> bool {
+    matches!(c, '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{feff}')
+}
 
 /// A [`Normalizer`] for the Thai script.
 ///
@@ -25,8 +34,9 @@ const ZWSP: char = '\u{200b}';
 /// preserved to ensure accurate search results.
 ///
 /// Additionally, this normalizer:
-/// - **Filters Zero-Width Space** (U+200B): Removes zero-width space characters
-///   from tokens while keeping character offsets in sync.
+/// - **Filters Zero-Width Characters** (U+200B, U+200C, U+200D, U+FEFF): Removes
+///   invisible zero-width space, non-joiner, joiner, and BOM characters from
+///   tokens while keeping character offsets in sync.
 /// - **Recomposes Sara Am** (ำ, U+0E33): Restores Sara Am which may have
 ///   been split into Nikhahit (U+0E4D) + Sara Aa (U+0E32) by the
 ///   [`CompatibilityDecompositionNormalizer`](super::CompatibilityDecompositionNormalizer).
@@ -73,9 +83,13 @@ impl Normalizer for ThaiNormalizer {
 }
 
 /// Returns `true` if the text contains characters that need normalization
-/// (decomposed Sara Am or Zero-Width Space inside a word).
+/// (decomposed Sara Am or Zero-Width characters inside a word).
 fn needs_normalization(text: &str) -> bool {
-    contains_decomposed_sara_am(text) || (text.contains(ZWSP) && text.chars().any(|c| c != ZWSP))
+    contains_decomposed_sara_am(text) || contains_zero_width_inside_word(text)
+}
+
+fn contains_zero_width_inside_word(text: &str) -> bool {
+    text.chars().any(is_zero_width) && text.chars().any(|c| !is_zero_width(c))
 }
 
 /// Returns `true` if the text contains Sara Am typed as Nikhahit (U+0E4D) + Sara Aa (U+0E32),
@@ -95,17 +109,17 @@ fn completes_sara_am(rest: &str) -> bool {
     }
 }
 
-/// Recompose Nikhahit (U+0E4D) + Sara Aa (U+0E32) into Sara Am (U+0E33) and remove ZWSP (U+200B),
+/// Recompose Nikhahit (U+0E4D) + Sara Aa (U+0E32) into Sara Am (U+0E33) and remove zero-width characters,
 /// yielding the length of each original char and the char it is replaced by:
-/// ZWSP is dropped when part of a word, Nikhahit is dropped, a tone mark between them is kept as-is,
+/// zero-width characters are dropped when part of a word, Nikhahit is dropped, a tone mark between them is kept as-is,
 /// and Sara Aa becomes Sara Am.
 fn recompose(lemma: &str) -> impl Iterator<Item = (usize, Option<char>)> + '_ {
-    let drop_zwsp = lemma.chars().any(|c| c != ZWSP);
+    let drop_zero_width = lemma.chars().any(|c| !is_zero_width(c));
     let mut pending_sara_am = false;
     lemma.char_indices().map(move |(i, c)| {
         let recomposed = match c {
-            // zero-width space inside a word is dropped.
-            ZWSP if drop_zwsp => None,
+            // zero-width characters inside a word are dropped.
+            c if is_zero_width(c) && drop_zero_width => None,
             // the following Sara Aa is replaced by Sara Am.
             NIKHAHIT if completes_sara_am(&lemma[i + c.len_utf8()..]) => {
                 pending_sara_am = true;
@@ -530,26 +544,33 @@ mod test {
     }
 
     #[test]
-    fn zero_width_space_is_removed_during_normalization() {
+    fn zero_width_characters_are_removed_during_normalization() {
         use crate::normalizer::Normalize;
 
-        let word_with_zwsp = "ภาษา\u{200b}ไทย";
-        let token = Token {
-            lemma: Owned(word_with_zwsp.to_string()),
-            char_end: word_with_zwsp.chars().count(),
-            byte_end: word_with_zwsp.len(),
-            script: Script::Thai,
-            language: Some(Language::Tha),
-            ..Default::default()
-        };
-        let options =
-            NormalizerOption { create_char_map: true, lossy: false, ..Default::default() };
-        let normalized = token.normalize(&options);
-        assert_eq!(normalized.lemma(), "ภาษาไทย");
-        // char_map should map normalized length back to original length including the 3-byte ZWSP
-        assert_eq!(
-            normalized.original_lengths(normalized.lemma().len()),
-            (word_with_zwsp.chars().count(), word_with_zwsp.len())
-        );
+        for word in [
+            "ภาษา\u{200b}ไทย", // ZWSP
+            "ภาษา\u{200c}ไทย", // ZWNJ
+            "ภาษา\u{200d}ไทย", // ZWJ
+            "ภาษา\u{feff}ไทย", // BOM / ZWNBSP
+            "ภา\u{200b}ษา\u{feff}ไทย",
+        ] {
+            let token = Token {
+                lemma: Owned(word.to_string()),
+                char_end: word.chars().count(),
+                byte_end: word.len(),
+                script: Script::Thai,
+                language: Some(Language::Tha),
+                ..Default::default()
+            };
+            let options =
+                NormalizerOption { create_char_map: true, lossy: false, ..Default::default() };
+            let normalized = token.normalize(&options);
+            assert_eq!(normalized.lemma(), "ภาษาไทย");
+            // char_map should map normalized length back to original length including zero-width chars
+            assert_eq!(
+                normalized.original_lengths(normalized.lemma().len()),
+                (word.chars().count(), word.len())
+            );
+        }
     }
 }

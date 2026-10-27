@@ -36,7 +36,7 @@ pub(crate) fn is_arabic(ch: char) -> bool {
         | '\u{0750}'..='\u{07FF}'
         | '\u{08A0}'..='\u{08FF}'
         | '\u{FB50}'..='\u{FDFF}'
-        | '\u{FE70}'..='\u{FEFF}'
+        | '\u{FE70}'..='\u{FEFC}'
         | '\u{10E60}'..='\u{10E7F}'
         | '\u{1EE00}'..='\u{1EEFF}'
     )

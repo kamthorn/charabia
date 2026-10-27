@@ -96,6 +96,12 @@ pub static DEFAULT_SEPARATOR_AHO: LazyLock<AhoCorasick> = LazyLock::new(|| {
     AhoCorasick::builder().match_kind(MatchKind::LeftmostLongest).build(DEFAULT_SEPARATORS).unwrap()
 });
 
+#[cfg(feature = "thai")]
+pub static THAI_SEPARATOR_AHO: LazyLock<AhoCorasick> = LazyLock::new(|| {
+    let separators = DEFAULT_SEPARATORS.iter().copied().filter(|&s| s != "\u{200C}");
+    AhoCorasick::builder().match_kind(MatchKind::LeftmostLongest).build(separators).unwrap()
+});
+
 /// Iterator over segmented [`Token`]s.
 pub struct SegmentedTokenIter<'o, 'aho, 'lang> {
     inner: SegmentedStrIter<'o, 'aho, 'lang>,
@@ -199,10 +205,13 @@ impl<'o> Iterator for SegmentedStrIter<'o, '_, '_> {
                     self.segmenter = segmenter(&mut detector);
                     self.script = detector.script();
                     self.language = detector.language;
-                    self.aho_iter = Some(AhoSegmentedStrIter::new(
-                        text,
-                        self.aho.unwrap_or(&DEFAULT_SEPARATOR_AHO),
-                    ));
+                    let aho = match (self.aho, self.script) {
+                        (Some(aho), _) => aho,
+                        #[cfg(feature = "thai")]
+                        (None, Script::Thai) => &*THAI_SEPARATOR_AHO,
+                        (None, _) => &*DEFAULT_SEPARATOR_AHO,
+                    };
+                    self.aho_iter = Some(AhoSegmentedStrIter::new(text, aho));
 
                     self.next()
                 }

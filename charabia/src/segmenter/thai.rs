@@ -2,6 +2,7 @@ use std::sync::LazyLock;
 
 use fst::raw::Fst;
 
+use crate::normalizer::thai::is_zero_width;
 // Import `Segmenter` trait.
 use crate::segmenter::Segmenter;
 
@@ -123,6 +124,13 @@ fn for_each_dictionary_match(fst: &Fst<&[u8]>, chars: &[(usize, char)], mut f: i
     let mut buffer = [0; 4];
     let mut len = 0;
     while let Some(&(_, c)) = chars.get(len) {
+        if is_zero_width(c) {
+            len += 1;
+            if node.is_final() {
+                f(len);
+            }
+            continue;
+        }
         let char_at = |i: usize| chars.get(i).map(|(_, c)| *c);
         let (matched, char_count) = match (c, char_at(len + 1), char_at(len + 2)) {
             (NIKHAHIT, Some(SARA_AA), _) => ([Some(SARA_AM), None], 2),
@@ -150,6 +158,10 @@ fn is_breakable(chars: &[(usize, char)], i: usize) -> bool {
     let (Some(previous), Some(current)) = (i.checked_sub(1).and_then(char_at), char_at(i)) else {
         return true;
     };
+
+    if is_zero_width(previous) || is_zero_width(current) {
+        return true;
+    }
 
     // a leading vowel is always followed by its consonant.
     let after_leading_vowel = is_leading_vowel(previous);
@@ -192,9 +204,11 @@ fn is_thai_consonant(c: char) -> bool {
     matches!(c, '\u{e01}'..='\u{e2e}')
 }
 
-/// Returns `true` if the char is a Thai consonant, vowel, tone mark or diacritic.
+/// Returns `true` if the char is a Thai consonant, vowel, tone mark or diacritic,
+/// or an invisible zero-width formatting character.
 fn is_thai_letter(c: char) -> bool {
     matches!(c, '\u{e01}'..='\u{e2e}' | '\u{e30}'..='\u{e3a}' | '\u{e40}'..='\u{e45}' | '\u{e47}'..='\u{e4e}')
+        || is_zero_width(c)
 }
 
 // Test the segmenter:
@@ -333,18 +347,22 @@ mod test {
     }
 
     #[test]
-    fn zero_width_space_acts_as_separator() {
-        use crate::TokenKind;
+    fn zero_width_characters_do_not_break_words() {
+        // ZWSP, ZWNJ, and BOM inside words should not break the word into pieces.
+        for text in
+            ["ประ\u{200b}ดิษฐ์", "ประ\u{200c}ดิษฐ์", "ประ\u{feff}ดิษฐ์", "ปัญ\u{200b}ญา", "เค\u{200b}มี"]
+        {
+            let tokens: Vec<_> =
+                crate::Tokenize::tokenize(&text).map(|t| t.lemma().to_string()).collect();
+            let clean = text.replace(['\u{200b}', '\u{200c}', '\u{200d}', '\u{feff}'], "");
+            assert_eq!(tokens, [clean]);
+        }
 
-        let tokens: Vec<_> = crate::Tokenize::tokenize(&"ภาษาไทย\u{200b}ง่ายนิดเดียว").collect();
-        let lemmas: Vec<_> = tokens.iter().map(|t| t.lemma()).collect();
-        let kinds: Vec<_> = tokens.iter().map(|t| t.kind).collect();
-
-        assert_eq!(lemmas, ["ภาษาไทย", "\u{200b}", "ง่าย", "นิดเดียว"]);
-        assert!(matches!(kinds[0], TokenKind::Word));
-        assert!(matches!(kinds[1], TokenKind::Separator(_)));
-        assert!(matches!(kinds[2], TokenKind::Word));
-        assert!(matches!(kinds[3], TokenKind::Word));
+        // Between words, zero-width characters allow word boundaries and are stripped cleanly.
+        let tokens: Vec<_> = crate::Tokenize::tokenize(&"ภาษาไทย\u{200b}ง่ายนิดเดียว")
+            .map(|t| t.lemma().to_string())
+            .collect();
+        assert_eq!(tokens, ["ภาษาไทย", "ง่าย", "นิดเดียว"]);
     }
 
     #[test]
