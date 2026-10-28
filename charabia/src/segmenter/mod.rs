@@ -38,6 +38,8 @@ mod korean;
 mod latin;
 #[cfg(feature = "thai")]
 mod thai;
+#[cfg(feature = "thai")]
+mod thai_tcc_tables;
 #[cfg(any(feature = "khmer", feature = "german-segmentation"))]
 mod utils;
 

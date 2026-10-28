@@ -3,13 +3,13 @@ use std::sync::LazyLock;
 use fst::raw::Fst;
 
 use crate::normalizer::thai::{is_thai_combining_mark, is_zero_width};
+use crate::segmenter::thai_tcc_tables::tcc_pos_array;
 // Import `Segmenter` trait.
 use crate::segmenter::Segmenter;
 
 const NIKHAHIT: char = '\u{e4d}';
 const SARA_AA: char = '\u{e32}';
 const SARA_AM: char = '\u{e33}';
-const THANTHAKHAT: char = '\u{e4c}';
 
 /// Thai specialized [`Segmenter`].
 ///
@@ -57,7 +57,7 @@ struct Step {
 fn segment_boundaries(fst: &Fst<&[u8]>, text: &str) -> Vec<usize> {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let byte_offset = |i: usize| chars.get(i).map_or(text.len(), |(offset, _)| *offset);
-    let breakable: Vec<bool> = (0..=chars.len()).map(|i| is_breakable(&chars, i)).collect();
+    let breakable: Vec<bool> = tcc_pos_array(&chars, is_zero_width);
 
     // steps[i] is the best segmentation of the i first chars, if the text can be cut before the i-th char.
     let mut steps: Vec<Option<Step>> = vec![None; chars.len() + 1];
@@ -163,58 +163,6 @@ fn for_each_dictionary_match(fst: &Fst<&[u8]>, chars: &[(usize, char)], mut f: i
             f(len);
         }
     }
-}
-
-/// Returns `true` if the text can be cut before the `i`-th char.
-fn is_breakable(chars: &[(usize, char)], i: usize) -> bool {
-    let char_at = |i: usize| chars.get(i).map(|(_, c)| *c);
-    let (Some(previous), Some(current)) = (i.checked_sub(1).and_then(char_at), char_at(i)) else {
-        return true;
-    };
-
-    if is_zero_width(previous) || is_zero_width(current) {
-        return true;
-    }
-
-    // a leading vowel is always followed by its consonant.
-    let after_leading_vowel = is_leading_vowel(previous);
-    // Mai Han-Akat is always followed by a final consonant (e.g. กัน).
-    let after_mai_han_akat = previous == '\u{e31}';
-    // a consonant with a tone mark and without vowel is followed by its vowel or its
-    // final consonant (e.g. ก่อน, ก้น), unlike after a leading vowel (e.g. ไม่|มี, ไหว้|วัน).
-    let after_toned_consonant = matches!(previous, '\u{e48}'..='\u{e4b}') && {
-        let before = |n: usize| i.checked_sub(n).and_then(char_at);
-        before(2).is_some_and(is_thai_consonant)
-            && !before(3).is_some_and(is_leading_vowel)
-            && !(before(3).is_some_and(is_thai_consonant)
-                && before(4).is_some_and(is_leading_vowel))
-    };
-    // vowels, tone marks and diacritics are always attached to the preceding character.
-    let before_dependent_char =
-        matches!(current, '\u{e30}'..='\u{e3a}' | '\u{e45}' | '\u{e47}'..='\u{e4e}');
-    // a silent consonant belongs to the preceding syllable (e.g. สัมพันธ์, ศักดิ์).
-    let before_silent_consonant = is_thai_consonant(current)
-        && matches!(
-            (char_at(i + 1), char_at(i + 2)),
-            (Some(THANTHAKHAT), _) | (Some('\u{e34}' | '\u{e38}'), Some(THANTHAKHAT))
-        );
-    // numbers are not split.
-    let inside_number = previous.is_numeric() && current.is_numeric();
-
-    !(after_leading_vowel
-        || after_mai_han_akat
-        || after_toned_consonant
-        || before_dependent_char
-        || before_silent_consonant
-        || inside_number)
-}
-
-fn is_leading_vowel(c: char) -> bool {
-    matches!(c, '\u{e40}'..='\u{e44}')
-}
-
-fn is_thai_consonant(c: char) -> bool {
-    matches!(c, '\u{e01}'..='\u{e2e}')
 }
 
 /// Returns `true` if the char is a Thai consonant, vowel, tone mark or diacritic,
