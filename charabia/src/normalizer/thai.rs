@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use super::{Normalizer, NormalizerOption};
+use super::{CharNormalizer, CharOrStr, Normalizer, NormalizerOption};
 use crate::{Script, Token};
 
 const NIKHAHIT: char = '\u{e4d}';
@@ -54,6 +54,23 @@ impl Normalizer for ThaiNormalizer {
 
     fn should_normalize(&self, token: &Token) -> bool {
         token.script == Script::Thai && needs_normalization(&token.lemma)
+    }
+}
+
+/// A lossy [`Normalizer`] replacing the Thai digits (๐ to ๙) by the ASCII digits,
+/// so that a year written ๒๕๖๗ matches 2567.
+pub struct ThaiDigitNormalizer;
+
+impl CharNormalizer for ThaiDigitNormalizer {
+    fn normalize_char(&self, c: char) -> Option<CharOrStr> {
+        match c {
+            '\u{e50}'..='\u{e59}' => Some(char::from(b'0' + (c as u32 - 0xe50) as u8).into()),
+            c => Some(c.into()),
+        }
+    }
+
+    fn should_normalize(&self, token: &Token) -> bool {
+        token.lemma().chars().any(|c| matches!(c, '\u{e50}'..='\u{e59}'))
     }
 }
 
@@ -338,5 +355,22 @@ mod test {
         let token = ThaiNormalizer.normalize(thai_token("ท\u{e48}\u{e35}"), &options(true));
         assert_eq!(token.lemma(), "ที่");
         assert_eq!(token.char_map, Some(vec![(3, 3), (3, 3), (3, 3)]));
+    }
+
+    #[test]
+    fn thai_digits_are_replaced_by_ascii_digits_when_lossy() {
+        let lossy = NormalizerOption { lossy: true, ..Default::default() };
+        for (text, expected) in [("๒๕๖๗", "2567"), ("1,1๐๐", "1,100"), ("พ.ศ.๒๕๖๗", "พ.ศ.2567")]
+        {
+            assert_eq!(text.normalize(&lossy), expected);
+        }
+        let non_lossy = NormalizerOption { lossy: false, ..Default::default() };
+        assert_eq!("๒๕๖๗".normalize(&non_lossy), "๒๕๖๗");
+
+        let tokens: Vec<_> = crate::Tokenize::tokenize(&"ปี ๒๕๖๗ และ 2567")
+            .filter(|t| t.is_word())
+            .map(|t| t.lemma().to_string())
+            .collect();
+        assert_eq!(tokens, ["ปี", "2567", "และ", "2567"]);
     }
 }
