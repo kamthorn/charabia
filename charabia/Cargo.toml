@@ -9,7 +9,6 @@ documentation = "https://docs.rs/charabia"
 repository = "https://github.com/meilisearch/charabia"
 keywords = ["segmenter", "tokenizer", "normalize", "language"]
 categories = ["text-processing"]
-exclude = ["dictionaries/txt/thai/words.txt"]
 
 [dependencies]
 aho-corasick = "1.1.5"
@@ -28,6 +27,7 @@ pinyin = { version = "0.11", default-features = false, features = [
 wana_kana = { version = "5.0.0", optional = true }
 unicode-normalization = "0.1.25"
 irg-kvariants = { path = "../irg-kvariants", version = "=0.1.1" }
+thaibreak = { version = "1.5.0", default-features = false, features = ["embedded-dict"], optional = true }
 
 [features]
 default = [
@@ -63,7 +63,7 @@ japanese-transliteration = ["dep:wana_kana"]
 korean = ["lindera/lindera-ko-dic", "lindera/embed-ko-dic"]
 
 # allow thai specialized tokenization
-thai = []
+thai = ["dep:thaibreak"]
 
 # allow greek specialized tokenization
 greek = []
