@@ -53,6 +53,17 @@ impl Segmenter for ThaiSegmenter {
     }
 }
 
+/// [`Segmenter`] for the Thai names of people, used for the Thai text with the Khmer locale:
+/// the text is only cut by the separators, so that a name is a single word, and the prefix
+/// search and the typo tolerance apply to the whole name.
+pub struct ThaiNameSegmenter;
+
+impl Segmenter for ThaiNameSegmenter {
+    fn segment_str<'o>(&self, to_segment: &'o str) -> Box<dyn Iterator<Item = &'o str> + 'o> {
+        Box::new(std::iter::once(to_segment))
+    }
+}
+
 // Test the segmenter:
 #[cfg(test)]
 mod test {
@@ -205,6 +216,37 @@ mod test {
             "่ี",
         ] {
             assert_eq!(segment_thai(text).concat(), text);
+        }
+    }
+
+    #[test]
+    fn thai_names_are_not_segmented_with_the_khmer_locale() {
+        use crate::{Language, TokenizerBuilder};
+
+        let mut builder = TokenizerBuilder::default();
+        let allow_list = [Language::Khm];
+        builder.allow_list(&allow_list);
+        let tokenizer = builder.build();
+        let words: Vec<_> = tokenizer
+            .tokenize("วัลลภา มูลเมือง")
+            .filter(|t| t.is_word())
+            .map(|t| t.lemma().to_string())
+            .collect();
+        assert_eq!(words, ["วัลลภา", "มูลเมือง"]);
+
+        // the other locales and the detected language still segment the text.
+        for allow_list in [&[Language::Eng][..], &[Language::Tha][..], &[][..]] {
+            let mut builder = TokenizerBuilder::default();
+            if !allow_list.is_empty() {
+                builder.allow_list(allow_list);
+            }
+            let tokenizer = builder.build();
+            let words: Vec<_> = tokenizer
+                .tokenize("ข้าวมันไก่")
+                .filter(|t| t.is_word())
+                .map(|t| t.lemma().to_string())
+                .collect();
+            assert_eq!(words, ["ข้าว", "มัน", "ไก่"], "{allow_list:?}");
         }
     }
 }
