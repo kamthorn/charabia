@@ -50,7 +50,7 @@ mod vietnamese;
 mod ae_oe_normalizer;
 mod persian;
 #[cfg(feature = "thai")]
-mod thai;
+pub(crate) mod thai;
 
 /// List of [`Normalizer`]s used by [`Normalize::normalize`] that are not considered lossy.
 pub static NORMALIZERS: LazyLock<Vec<Box<dyn Normalizer>>> = LazyLock::new(|| {
