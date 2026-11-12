@@ -18,7 +18,7 @@ pub use korean::KoreanSegmenter;
 pub use latin::LatinSegmenter;
 use slice_group_by::StrGroupBy;
 #[cfg(feature = "thai")]
-pub use thai::ThaiSegmenter;
+pub use thai::{ThaiNameSegmenter, ThaiSegmenter};
 
 use crate::detection::{Detect, Language, Script, StrDetection};
 use crate::separators::DEFAULT_SEPARATORS;
@@ -74,6 +74,13 @@ pub static SEGMENTERS: LazyLock<SegmenterMap> = LazyLock::new(|| {
         // thai segmenter
         #[cfg(feature = "thai")]
         ((Script::Thai, Some(Language::Tha)), Box::new(ThaiSegmenter) as Box<dyn Segmenter>),
+        // the Thai text of the other locales is segmented as Thai.
+        #[cfg(feature = "thai")]
+        ((Script::Thai, None), Box::new(ThaiSegmenter) as Box<dyn Segmenter>),
+        // ThaiJO: the Thai names of people are indexed with the Khmer locale, which is never
+        // used for Thai text otherwise, so that a name is not segmented.
+        #[cfg(feature = "thai")]
+        ((Script::Thai, Some(Language::Khm)), Box::new(ThaiNameSegmenter) as Box<dyn Segmenter>),
         #[cfg(feature = "khmer")]
         ((Script::Khmer, Some(Language::Khm)), Box::new(KhmerSegmenter) as Box<dyn Segmenter>),
         // arabic segmenter
