@@ -19,7 +19,7 @@ use self::quote::QuoteNormalizer;
 #[cfg(feature = "swedish-recomposition")]
 use self::swedish_recomposition::SwedishRecompositionNormalizer;
 #[cfg(feature = "thai")]
-use self::thai::{ThaiDigitNormalizer, ThaiNormalizer};
+use self::thai::{ThaiAbbreviationNormalizer, ThaiDigitNormalizer, ThaiNormalizer};
 #[cfg(feature = "turkish")]
 pub use self::turkish::TurkishNormalizer;
 #[cfg(feature = "vietnamese")]
@@ -86,6 +86,8 @@ pub static LOSSY_NORMALIZERS: LazyLock<Vec<Box<dyn Normalizer>>> = LazyLock::new
         Box::new(TurkishNormalizer),
         #[cfg(feature = "thai")]
         Box::new(ThaiDigitNormalizer),
+        #[cfg(feature = "thai")]
+        Box::new(ThaiAbbreviationNormalizer),
     ]
 });
 

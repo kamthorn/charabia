@@ -34,7 +34,21 @@ static TOKENIZER: LazyLock<Tokenizer> = LazyLock::new(|| {
 
 impl Segmenter for ThaiSegmenter {
     fn segment_str<'o>(&self, to_segment: &'o str) -> Box<dyn Iterator<Item = &'o str> + 'o> {
-        let boundaries = TOKENIZER.boundaries(to_segment);
+        let mut boundaries = TOKENIZER.boundaries(to_segment);
+        // the abbreviation mark ฯ ends the word before it, which the
+        // ThaiAbbreviationNormalizer then removes from the lemma (เกล้าฯ, not เกล้า and ฯ).
+        let mut i = 1;
+        while i + 1 < boundaries.len() {
+            let (before, mark) = (
+                &to_segment[boundaries[i - 1]..boundaries[i]],
+                &to_segment[boundaries[i]..boundaries[i + 1]],
+            );
+            if mark == "ฯ" && !before.trim().is_empty() {
+                boundaries.remove(i);
+            } else {
+                i += 1;
+            }
+        }
         Box::new((1..boundaries.len()).map(move |i| &to_segment[boundaries[i - 1]..boundaries[i]]))
     }
 }
@@ -145,6 +159,13 @@ mod test {
     fn the_repetition_mark_is_a_separator() {
         assert_eq!(words("สิ่งต่างๆ"), ["สิ่ง", "ต่าง"]);
         assert_eq!(words("เด็ก ๆ ชอบ"), ["เด็ก", "ชอบ"]);
+    }
+
+    #[test]
+    fn the_abbreviation_mark_is_removed_from_the_word() {
+        assert_eq!(words("กรุงเทพฯ"), ["กรุงเทพ"]);
+        assert_eq!(words("ทูลเกล้าฯ ถวาย"), ["ทูล", "เกล้า", "ถวาย"]);
+        assert_eq!(words("ผลไม้ ฯลฯ"), ["ผลไม้", "ฯลฯ"]);
     }
 
     #[test]

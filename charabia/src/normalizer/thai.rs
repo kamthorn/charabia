@@ -74,6 +74,46 @@ impl CharNormalizer for ThaiDigitNormalizer {
     }
 }
 
+/// A lossy [`Normalizer`] removing the abbreviation mark ฯ (Paiyannoi) at the end of a word,
+/// so that กรุงเทพฯ matches กรุงเทพ, and a query for กรุงเทพฯ is still a prefix of กรุงเทพมหานคร.
+/// ฯลฯ (et cetera) and a ฯ alone are kept.
+pub struct ThaiAbbreviationNormalizer;
+
+const PAIYANNOI: char = '\u{e2f}';
+
+impl Normalizer for ThaiAbbreviationNormalizer {
+    fn normalize<'o>(&self, mut token: Token<'o>, options: &NormalizerOption) -> Token<'o> {
+        if !ends_with_abbreviation_mark(&token.lemma) {
+            return token;
+        }
+        if let Some(char_map) = token.char_map.as_mut() {
+            // the mark is the last char of the original text.
+            if let Some(last) = char_map.last_mut() {
+                last.1 = 0;
+            }
+        } else if options.create_char_map {
+            let mut char_map: Vec<(u8, u8)> =
+                token.lemma.chars().map(|c| (c.len_utf8() as u8, c.len_utf8() as u8)).collect();
+            if let Some(last) = char_map.last_mut() {
+                last.1 = 0;
+            }
+            token.char_map = Some(char_map);
+        }
+        let mut lemma = token.lemma.into_owned();
+        lemma.pop();
+        token.lemma = Cow::Owned(lemma);
+        token
+    }
+
+    fn should_normalize(&self, token: &Token) -> bool {
+        ends_with_abbreviation_mark(&token.lemma)
+    }
+}
+
+fn ends_with_abbreviation_mark(lemma: &str) -> bool {
+    lemma.ends_with(PAIYANNOI) && lemma.chars().count() > 1 && !lemma.ends_with("ฯลฯ")
+}
+
 /// Returns `true` if the normalization changes the text, see [`ThaiNormalizer`].
 pub(crate) fn needs_normalization(text: &str) -> bool {
     text.chars().zip(normalize_chars(text)).any(|(c, (_, normalized))| normalized != Some(c))
@@ -346,6 +386,23 @@ mod test {
         {
             let token = ThaiNormalizer.normalize(thai_token(lemma), &options(true));
             assert!(matches!(token.lemma, Borrowed(_)), "{lemma} must not be reallocated");
+        }
+    }
+
+    #[test]
+    fn abbreviation_mark_at_the_end_of_a_word() {
+        for create_char_map in [false, true] {
+            let token = ThaiAbbreviationNormalizer
+                .normalize(thai_token("กรุงเทพฯ"), &options(create_char_map));
+            assert_eq!(token.lemma(), "กรุงเทพ");
+            if create_char_map {
+                let char_map = token.char_map.unwrap();
+                assert_eq!(char_map.len(), 8);
+                assert_eq!(char_map.last(), Some(&(3, 0)));
+            }
+        }
+        for kept in ["ฯ", "ฯลฯ", "กรุงเทพ"] {
+            assert!(!ThaiAbbreviationNormalizer.should_normalize(&thai_token(kept)), "{kept}");
         }
     }
 
