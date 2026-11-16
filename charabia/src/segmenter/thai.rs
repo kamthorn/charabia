@@ -134,6 +134,19 @@ mod test {
         assert_eq!(tokens, ["ภูมิปัญญา", "และ", "ที่ดิน"]);
     }
 
+    fn words(text: &str) -> Vec<String> {
+        crate::Tokenize::tokenize(&text)
+            .filter(|t| t.is_word())
+            .map(|t| t.lemma().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn the_repetition_mark_is_a_separator() {
+        assert_eq!(words("สิ่งต่างๆ"), ["สิ่ง", "ต่าง"]);
+        assert_eq!(words("เด็ก ๆ ชอบ"), ["เด็ก", "ชอบ"]);
+    }
+
     #[test]
     fn segments_cover_the_whole_text() {
         for text in [
