@@ -1,8 +1,6 @@
 use std::sync::LazyLock;
 
-use thaibreak::break_iterator::BreakIterator;
-use thaibreak::tokenizer::Tokenizer;
-use thaibreak::trie::ThaiTrie;
+use thaibreak::{MatchOptions, ThaiTrie, Tokenizer};
 
 // Import `Segmenter` trait.
 use crate::segmenter::Segmenter;
@@ -15,16 +13,28 @@ use crate::segmenter::Segmenter;
 ///
 /// The base dictionary of thai-break has few long compounds, so the parts of a compound word
 /// are segments of their own and can be searched.
+///
+/// The match options of thai-break let a dictionary word match through the typing variants that
+/// the `ThaiNormalizer` removes (an invisible char, a
+/// mark typed twice, a tone mark typed before the vowel), so that they do not cut a word; the
+/// segments are still slices of the original text.
 pub struct ThaiSegmenter;
 
 static TOKENIZER: LazyLock<Tokenizer> = LazyLock::new(|| {
-    let trie = ThaiTrie::embedded().expect("the dictionary embedded in thai-break is valid");
-    Tokenizer::new(trie, None)
+    let mut trie = ThaiTrie::embedded().expect("the dictionary embedded in thai-break is valid");
+    trie.set_compact_lookup(true);
+    let mut tokenizer = Tokenizer::new(trie, None);
+    tokenizer.set_match_options(MatchOptions {
+        ignore_invisible: true,
+        collapse_repeated_marks: true,
+        reorder_tone_marks: true,
+    });
+    tokenizer
 });
 
 impl Segmenter for ThaiSegmenter {
     fn segment_str<'o>(&self, to_segment: &'o str) -> Box<dyn Iterator<Item = &'o str> + 'o> {
-        let boundaries = BreakIterator::new(&TOKENIZER, to_segment).boundaries().to_vec();
+        let boundaries = TOKENIZER.boundaries(to_segment);
         Box::new((1..boundaries.len()).map(move |i| &to_segment[boundaries[i - 1]..boundaries[i]]))
     }
 }
@@ -104,6 +114,27 @@ mod test {
     }
 
     #[test]
+    fn typing_variants_are_segmented_like_the_normalized_text() {
+        for (variant, expected) in [
+            ("ภูมิ\u{200d}ปัญญา", &["ภูมิ\u{200d}ปัญญา"][..]),
+            ("และ\u{200b}แนวทาง", &["และ\u{200b}", "แนวทาง"][..]),
+            ("\u{feff}การตีตรา", &["\u{feff}การ", "ตี", "ตรา"][..]),
+            ("เพื่\u{ad}อศึกษา", &["เพื่\u{ad}อ", "ศึกษา"][..]),
+            ("เพื่่อการเกษตร", &["เพื่่อ", "การ", "เกษตร"][..]),
+            ("เเรงจูงใจ", &["เเรง", "จูง", "ใจ"][..]),
+            ("ท\u{e48}\u{e35}ดิน", &["ท\u{e48}\u{e35}ดิน"][..]),
+        ] {
+            assert_eq!(segment_thai(variant), expected, "{variant:?}");
+        }
+
+        let tokens: Vec<_> =
+            crate::Tokenize::tokenize(&"ภูมิ\u{200d}ปัญญาและ\u{200b}ท\u{e48}\u{e35}ดิน")
+                .map(|t| t.lemma().to_string())
+                .collect();
+        assert_eq!(tokens, ["ภูมิปัญญา", "และ", "ที่ดิน"]);
+    }
+
+    #[test]
     fn segments_cover_the_whole_text() {
         for text in [
             "",
@@ -116,6 +147,11 @@ mod test {
             "ก\u{e4d}\u{e49}",
             "กกกกกกกกกกกกกกกก",
             "ภาษาไทย123abc",
+            "\u{200b}",
+            "\u{200b}\u{200b}ก",
+            "ก\u{200b}",
+            "เเ",
+            "่ี",
         ] {
             assert_eq!(segment_thai(text).concat(), text);
         }
