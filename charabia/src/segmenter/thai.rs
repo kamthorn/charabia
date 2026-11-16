@@ -169,6 +169,23 @@ mod test {
     }
 
     #[test]
+    fn the_full_stop_of_a_thai_abbreviation_is_a_soft_separator() {
+        use crate::{SeparatorKind, TokenKind};
+        let hard = |text: &str| {
+            crate::Tokenize::tokenize(&text)
+                .filter(|t| t.kind == TokenKind::Separator(SeparatorKind::Hard))
+                .count()
+        };
+        assert_eq!(hard("พ.ศ. ๒๕๖๗"), 0);
+        assert_eq!(hard("ผศ.ดร. สมชาย"), 0);
+        assert_eq!(hard("กทม. และ"), 0);
+        // the end of a sentence stays a hard separator.
+        assert_eq!(hard("คนไทย. ต่อไป"), 1);
+        assert_eq!(hard("ข้อ 1. การวิจัย"), 1);
+        assert_eq!(hard("end. Next"), 1);
+    }
+
+    #[test]
     fn segments_cover_the_whole_text() {
         for text in [
             "",

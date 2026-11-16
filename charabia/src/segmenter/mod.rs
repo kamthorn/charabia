@@ -144,6 +144,8 @@ pub struct SegmentedStrIter<'o, 'aho, 'lang> {
     allow_list: Option<&'lang [Language]>,
     script: Script,
     language: Option<Language>,
+    /// The last segment returned.
+    prev: &'o str,
 }
 
 impl<'o, 'aho, 'lang> SegmentedStrIter<'o, 'aho, 'lang> {
@@ -176,14 +178,11 @@ impl<'o, 'aho, 'lang> SegmentedStrIter<'o, 'aho, 'lang> {
             allow_list,
             script: Script::Other,
             language: None,
+            prev: "",
         }
     }
-}
 
-impl<'o> Iterator for SegmentedStrIter<'o, '_, '_> {
-    type Item = &'o str;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    fn next_segment(&mut self) -> Option<&'o str> {
         match self.current.next() {
             Some(s) => Some(s),
             None => match self.aho_iter.as_mut().and_then(|aho_iter| aho_iter.next()) {
@@ -191,7 +190,7 @@ impl<'o> Iterator for SegmentedStrIter<'o, '_, '_> {
                 Some((s, MatchType::Interleave)) => {
                     self.current = self.segmenter.segment_str(s);
 
-                    self.next()
+                    self.next_segment()
                 }
                 None => {
                     let text = self.inner.next()?;
@@ -204,10 +203,35 @@ impl<'o> Iterator for SegmentedStrIter<'o, '_, '_> {
                         self.aho.unwrap_or(&DEFAULT_SEPARATOR_AHO),
                     ));
 
-                    self.next()
+                    self.next_segment()
                 }
             },
         }
+    }
+}
+
+/// Whether `s` is a Thai abbreviation before its full stop: one to three Thai consonants
+/// (the ศ of พ.ศ., ดร, กทม). A Thai sentence does not end with a full stop, so ". " after
+/// such a segment ends an abbreviation, not a sentence.
+fn is_thai_abbreviation(s: &str) -> bool {
+    (1..=3).contains(&s.chars().count()) && s.chars().all(|c| ('ก'..='ฮ').contains(&c))
+}
+
+impl<'o> Iterator for SegmentedStrIter<'o, '_, '_> {
+    type Item = &'o str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let s = self.next_segment()?;
+        // the full stop of a Thai abbreviation is a soft separator, not the end of a sentence:
+        // ". " is returned as "." and " ".
+        if s == ". " && self.script == Script::Thai && is_thai_abbreviation(self.prev) {
+            let (dot, space) = s.split_at(1);
+            self.current = Box::new(std::iter::once(space));
+            self.prev = dot;
+            return Some(dot);
+        }
+        self.prev = s;
+        Some(s)
     }
 }
 
